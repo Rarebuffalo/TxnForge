@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { organization } from "better-auth/plugins/organization";
-import { rateLimit } from "better-auth/plugins/rateLimit";
+import { rateLimit } from "better-auth/plugins/rate-limit";
 import { PrismaClient } from "@prisma/client";
 
 // Initialize the Prisma Client instance.
