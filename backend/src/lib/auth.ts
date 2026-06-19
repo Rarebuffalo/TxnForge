@@ -9,6 +9,9 @@ export const auth = betterAuth({
     provider: "postgresql",
   }),
   
+  // Allow cross-origin requests from frontend client URL
+  trustedOrigins: [process.env.FRONTEND_URL || "http://localhost:3000"],
+  
   // Enable email and password authentication.
   emailAndPassword: {
     enabled: true,
