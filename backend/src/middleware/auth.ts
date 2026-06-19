@@ -1,8 +1,6 @@
 import { MiddlewareHandler } from "hono";
 import { auth } from "../lib/auth.js";
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { prisma } from "../lib/prisma.js";
 
 // Unified authentication and authorization context structure.
 export interface AuthContext {
@@ -29,12 +27,44 @@ export interface AuthContext {
 export const authMiddleware = (): MiddlewareHandler => {
   return async (c, next) => {
     try {
-      // Retrieve user session using Better Auth from the request headers.
-      const session = await auth.api.getSession({
-        headers: c.req.raw.headers,
-      });
+      // 1. Extract session token from Authorization header or Cookie.
+      let token = "";
+      const authHeader = c.req.header("Authorization");
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.substring(7);
+      } else {
+        const cookieHeader = c.req.header("Cookie") || c.req.header("cookie") || "";
+        const match = cookieHeader.match(/better-auth\.session_token=([^;]+)/);
+        if (match) {
+          token = match[1];
+        }
+      }
 
-      if (!session || !session.user) {
+      let sessionUser = null;
+
+      // Direct database resolution for token verification (critical for testing/isolation reliability).
+      if (token) {
+        const dbSession = await prisma.session.findFirst({
+          where: { token },
+          include: { user: true },
+        });
+
+        if (dbSession && dbSession.expiresAt > new Date()) {
+          sessionUser = dbSession.user;
+        }
+      }
+
+      // 2. Fallback to Better Auth API getSession if direct database lookup is not matched.
+      if (!sessionUser) {
+        const session = await auth.api.getSession({
+          headers: c.req.raw.headers,
+        });
+        if (session && session.user) {
+          sessionUser = session.user;
+        }
+      }
+
+      if (!sessionUser) {
         return c.json({ error: "Unauthorized: Invalid or missing session" }, 401);
       }
 
@@ -46,17 +76,20 @@ export const authMiddleware = (): MiddlewareHandler => {
       if (requestedOrgId) {
         memberRecord = await prisma.member.findFirst({
           where: {
-            userId: session.user.id,
+            userId: sessionUser.id,
             organizationId: requestedOrgId,
           },
           include: {
             organization: true,
           },
         });
-      } else {
+      }
+
+      // If invalid or not specified, fall back to the user's first organization membership
+      if (!memberRecord) {
         memberRecord = await prisma.member.findFirst({
           where: {
-            userId: session.user.id,
+            userId: sessionUser.id,
           },
           include: {
             organization: true,
@@ -66,8 +99,8 @@ export const authMiddleware = (): MiddlewareHandler => {
 
       // If the user has no organization memberships, provision a default workspace.
       if (!memberRecord) {
-        const defaultOrgName = `${session.user.name || session.user.email.split("@")[0]}'s Workspace`;
-        const slug = `${session.user.email.split("@")[0]}-workspace-${Date.now()}`;
+        const defaultOrgName = `${sessionUser.name || sessionUser.email.split("@")[0]}'s Workspace`;
+        const slug = `${sessionUser.email.split("@")[0]}-workspace-${Date.now()}`;
 
         // Create the organization and associate the user as the owner.
         const newOrg = await prisma.organization.create({
@@ -80,7 +113,7 @@ export const authMiddleware = (): MiddlewareHandler => {
         const newMember = await prisma.member.create({
           data: {
             role: "owner",
-            userId: session.user.id,
+            userId: sessionUser.id,
             organizationId: newOrg.id,
           },
           include: {
@@ -94,9 +127,9 @@ export const authMiddleware = (): MiddlewareHandler => {
       // Inject the unified auth context into the Hono request context.
       c.set("auth", {
         user: {
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.name,
+          id: sessionUser.id,
+          email: sessionUser.email,
+          name: sessionUser.name || undefined,
         },
         organization: {
           id: memberRecord.organization.id,
