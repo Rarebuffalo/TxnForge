@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient } from "../../lib/auth-client.js";
+import { authClient } from "@/lib/auth-client";
 import { ArrowRight, Lock, Mail, Loader2 } from "lucide-react";
 
 export default function LoginPage() {

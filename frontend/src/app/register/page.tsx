@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient } from "../../lib/auth-client.js";
+import { authClient } from "@/lib/auth-client";
 import { ArrowRight, Lock, Mail, User, Loader2 } from "lucide-react";
 
 export default function RegisterPage() {
@@ -24,7 +24,7 @@ export default function RegisterPage() {
       const { data, error } = await authClient.signUp.email({
         email,
         password,
-        name: name || undefined,
+        name: name,
         // Since Hono backend exposes signup, this maps to POST /api/auth/signup.
         // We can also let it sign up and automatically sign in.
       });
