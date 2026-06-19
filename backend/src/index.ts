@@ -4,12 +4,22 @@ import { serve } from "@hono/node-server";
 import { auth } from "./lib/auth.js";
 import { authRouter } from "./routes/auth.js";
 import { transactionRouter } from "./routes/transactions.js";
+import { rateLimiter } from "./middleware/rate-limit.js";
 import dotenv from "dotenv";
 
 // Load configuration environment variables.
 dotenv.config();
 
 const app = new Hono();
+
+// Apply rate limiter to all API endpoints (100 requests per minute).
+app.use(
+  "/api/*",
+  rateLimiter({
+    windowMs: 60 * 1000,
+    max: 100,
+  })
+);
 
 // Enable Cross-Origin Resource Sharing (CORS) for Next.js frontend communication.
 app.use(
