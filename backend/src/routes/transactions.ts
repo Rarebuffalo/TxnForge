@@ -4,7 +4,7 @@ import { authMiddleware, AuthContext } from "../middleware/auth.js";
 import { parseTransaction } from "../lib/parser.js";
 
 const prisma = new PrismaClient();
-export const transactionRouter = new Hono();
+export const transactionRouter = new Hono<{ Variables: { auth: AuthContext } }>();
 
 // Protect all transaction endpoints with the auth context middleware.
 transactionRouter.use("*", authMiddleware());
