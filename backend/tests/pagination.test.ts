@@ -1,10 +1,8 @@
-import request from "supertest";
 import { Hono } from "hono";
 import { transactionRouter } from "../src/routes/transactions.js";
-import { PrismaClient } from "@prisma/client";
 import { auth } from "../src/lib/auth.js";
+import { prisma } from "../src/lib/prisma.js";
 
-const prisma = new PrismaClient();
 const app = new Hono();
 app.route("/api/transactions", transactionRouter);
 
@@ -15,7 +13,6 @@ describe("Cursor-Based Pagination Tests", () => {
   const createdTxnIds: string[] = [];
 
   beforeAll(async () => {
-    // Create test user and organization
     const user = await auth.api.signUpEmail({
       body: {
         email: `pager-${Date.now()}@example.com`,
@@ -23,8 +20,31 @@ describe("Cursor-Based Pagination Tests", () => {
         name: "Pager",
       },
     });
-    token = user.session.token;
     userId = user.user.id;
+
+    // Sign in to create a database session and retrieve a valid session token.
+    const signInResult = await auth.api.signInEmail({
+      body: {
+        email: user.user.email,
+        password: "password123",
+      },
+    });
+    token = signInResult.token || "";
+
+    // Manually provision organization and member record for the test user.
+    const defaultOrg = await prisma.organization.create({
+      data: {
+        name: "Pager's Workspace",
+        slug: `pager-workspace-${Date.now()}`,
+      },
+    });
+    await prisma.member.create({
+      data: {
+        role: "owner",
+        userId: userId,
+        organizationId: defaultOrg.id,
+      },
+    });
 
     const member = await prisma.member.findFirst({
       where: { userId },
@@ -51,6 +71,12 @@ describe("Cursor-Based Pagination Tests", () => {
 
   afterAll(async () => {
     // Cleanup.
+    await prisma.transaction.deleteMany({
+      where: { userId },
+    });
+    await prisma.member.deleteMany({
+      where: { userId },
+    });
     await prisma.user.delete({
       where: { id: userId },
     });
@@ -62,59 +88,73 @@ describe("Cursor-Based Pagination Tests", () => {
 
   test("Fetch page 1 - Should return limit transactions and a nextCursor", async () => {
     const limit = 5;
-    const res = await request(app.fetch)
-      .get(`/api/transactions?limit=${limit}`)
-      .set("Authorization", `Bearer ${token}`);
+    const res = await app.request(`http://localhost:8000/api/transactions?limit=${limit}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Cookie: `better-auth.session_token=${token}`,
+      },
+    });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.length).toBe(limit);
-    expect(res.body.nextCursor).not.toBeNull();
+    const body = await res.json() as any;
+    expect(body.data.length).toBe(limit);
+    expect(body.nextCursor).not.toBeNull();
     
     // Test that the items are sorted descending by date (transaction #12 should be first)
-    expect(res.body.data[0].description).toBe("Test Transaction #12");
+    expect(body.data[0].description).toBe("Test Transaction #12");
   });
 
   test("Fetch page 2 - Using nextCursor from page 1", async () => {
     // Fetch Page 1
     const limit = 5;
-    const page1Res = await request(app.fetch)
-      .get(`/api/transactions?limit=${limit}`)
-      .set("Authorization", `Bearer ${token}`);
-    
-    const cursor = page1Res.body.nextCursor;
+    const page1Res = await app.request(`http://localhost:8000/api/transactions?limit=${limit}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Cookie: `better-auth.session_token=${token}`,
+      },
+    });
+    const page1Body = await page1Res.json() as any;
+    const cursor = page1Body.nextCursor;
 
     // Fetch Page 2
-    const page2Res = await request(app.fetch)
-      .get(`/api/transactions?limit=${limit}&cursor=${cursor}`)
-      .set("Authorization", `Bearer ${token}`);
+    const page2Res = await app.request(`http://localhost:8000/api/transactions?limit=${limit}&cursor=${cursor}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Cookie: `better-auth.session_token=${token}`,
+      },
+    });
 
     expect(page2Res.status).toBe(200);
-    expect(page2Res.body.data.length).toBe(limit);
-    expect(page2Res.body.nextCursor).not.toBeNull();
-    // The first element of Page 2 should be the next element after the cursor (Transaction #6)
-    // Page 1: #12, #11, #10, #9, #8. The cursor is #8.
-    // Page 2: #7, #6, #5, #4, #3. The next cursor is #3.
-    expect(page2Res.body.data[0].description).toBe("Test Transaction #7");
+    const page2Body = await page2Res.json() as any;
+    expect(page2Body.data.length).toBe(limit);
+    expect(page2Body.nextCursor).not.toBeNull();
+    expect(page2Body.data[0].description).toBe("Test Transaction #7");
   });
 
   test("Fetch final page - Should yield remaining transactions and nextCursor as null", async () => {
-    // Fetch Page 1 (limit 10) -> returns 10 items, cursor is transaction #3
     const limit = 10;
-    const page1Res = await request(app.fetch)
-      .get(`/api/transactions?limit=${limit}`)
-      .set("Authorization", `Bearer ${token}`);
-
-    const cursor = page1Res.body.nextCursor;
+    const page1Res = await app.request(`http://localhost:8000/api/transactions?limit=${limit}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Cookie: `better-auth.session_token=${token}`,
+      },
+    });
+    const page1Body = await page1Res.json() as any;
+    const cursor = page1Body.nextCursor;
 
     // Fetch Page 2 (limit 10) -> returns remaining 2 items (Transaction #2, #1)
-    const page2Res = await request(app.fetch)
-      .get(`/api/transactions?limit=${limit}&cursor=${cursor}`)
-      .set("Authorization", `Bearer ${token}`);
+    const page2Res = await app.request(`http://localhost:8000/api/transactions?limit=${limit}&cursor=${cursor}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Cookie: `better-auth.session_token=${token}`,
+      },
+    });
 
     expect(page2Res.status).toBe(200);
-    expect(page2Res.body.data.length).toBe(2);
-    expect(page2Res.body.nextCursor).toBeNull(); // No more items left
-    expect(page2Res.body.data[0].description).toBe("Test Transaction #2");
-    expect(page2Res.body.data[1].description).toBe("Test Transaction #1");
+    const page2Body = await page2Res.json() as any;
+    expect(page2Body.data.length).toBe(2);
+    expect(page2Body.nextCursor).toBeNull(); // No more items left
+    expect(page2Body.data[0].description).toBe("Test Transaction #2");
+    expect(page2Body.data[1].description).toBe("Test Transaction #1");
   });
 });
