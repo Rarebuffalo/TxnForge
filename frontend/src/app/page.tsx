@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
-import { LogOut, Plus, Send, RefreshCw, Layers, LayoutGrid, Calendar, Wallet, FileText, CheckCircle2, AlertTriangle, User as UserIcon } from "lucide-react";
+import { LogOut, Plus, Send, RefreshCw, Layers, LayoutGrid, Calendar, Wallet, FileText, CheckCircle2, AlertTriangle, User as UserIcon, Loader2 } from "lucide-react";
 
 interface Transaction {
   id: string;
