@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { authMiddleware, AuthContext } from "../middleware/auth.js";
 import { parseTransaction } from "../lib/parser.js";
-
-const prisma = new PrismaClient();
+import { prisma } from "../lib/prisma.js";
 export const transactionRouter = new Hono<{ Variables: { auth: AuthContext } }>();
 
 // Protect all transaction endpoints with the auth context middleware.
@@ -88,8 +87,8 @@ transactionRouter.get("/", async (c) => {
     // Check if there is a next page and format the response.
     let nextCursor: string | null = null;
     if (transactions.length > limit) {
-      const nextItem = transactions.pop(); // Remove the extra peek element.
-      nextCursor = nextItem?.id || null;
+      transactions.pop(); // Remove the extra peek element.
+      nextCursor = transactions[transactions.length - 1]?.id || null;
     }
 
     return c.json({
