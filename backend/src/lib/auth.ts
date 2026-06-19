@@ -1,7 +1,6 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { organization } from "better-auth/plugins/organization";
-import { rateLimit } from "better-auth/plugins/rate-limit";
 import { PrismaClient } from "@prisma/client";
 
 // Initialize the Prisma Client instance.
@@ -18,18 +17,12 @@ export const auth = betterAuth({
     enabled: true,
   },
   
-  // Set up plugins for multi-tenancy and rate limiting.
+  // Set up plugins for multi-tenancy.
   plugins: [
     // Organization plugin enables teams/workspace isolation.
     organization({
       // We will keep standard settings. Membership and roles are managed here.
       creatorRole: "owner",
-    }),
-    
-    // Rate limit plugin protects auth and API endpoints from abuse.
-    rateLimit({
-      window: 60, // Time window in seconds.
-      max: 100,  // Max requests allowed per window.
     }),
   ],
 });
