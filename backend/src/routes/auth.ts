@@ -53,7 +53,7 @@ authRouter.post("/register", async (c) => {
     return c.json({
       message: "Registration successful",
       user: user.user,
-      session: user.session,
+      token: user.token,
     }, 201);
   } catch (error: any) {
     console.error("Registration endpoint error:", error);
@@ -88,7 +88,7 @@ authRouter.post("/login", async (c) => {
     return c.json({
       message: "Login successful",
       user: result.user,
-      session: result.session,
+      token: result.token,
     }, 200);
   } catch (error: any) {
     console.error("Login endpoint error:", error);
