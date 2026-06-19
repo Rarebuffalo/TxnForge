@@ -8,4 +8,4 @@ DROP POLICY IF EXISTS tenant_isolation_policy ON transaction;
 -- It checks that the organization_id of the transaction matches the active organization
 -- set in the 'app.current_org_id' local database context parameter.
 CREATE POLICY tenant_isolation_policy ON transaction
-  USING (organization_id = current_setting('app.current_org_id', true));
+  USING ("organizationId" = current_setting('app.current_org_id', true));
