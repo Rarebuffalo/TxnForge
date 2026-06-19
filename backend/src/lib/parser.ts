@@ -60,8 +60,8 @@ export function parseAmount(text: string): number | null {
     if (!isNaN(value)) return value;
   }
 
-  // Pattern 2: ₹1,250.00 debited or ₹2,999.00 Dr
-  const currencyAmount = text.match(/₹?\s*([0-9,.]+)\s*(debited|credited|Dr|Cr|-|\+)?/i);
+  // Pattern 2: ₹1,250.00 debited or ₹2,999.00 Dr (requires currency symbol to avoid matching date parts or txn IDs)
+  const currencyAmount = text.match(/(?:₹|Rs\.?)\s*([0-9,.]+)\s*(debited|credited|Dr|Cr|-|\+)?/i);
   if (currencyAmount) {
     const clean = currencyAmount[1].replace(/[,\s]/g, "");
     let value = parseFloat(clean);
