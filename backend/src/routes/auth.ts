@@ -1,8 +1,6 @@
 import { Hono } from "hono";
 import { auth } from "../lib/auth.js";
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { prisma } from "../lib/prisma.js";
 export const authRouter = new Hono();
 
 /**
