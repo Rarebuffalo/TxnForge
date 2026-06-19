@@ -130,4 +130,3 @@ model Transaction {
   @@index([userId, createdAt])
   @@map("transaction")
 }
-```
