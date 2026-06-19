@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { authMiddleware, AuthContext } from "../middleware/auth.js";
 import { parseTransaction } from "../lib/parser.js";
 
@@ -26,7 +26,7 @@ transactionRouter.post("/extract", async (c) => {
     const parsed = parseTransaction(text);
 
     // Save transaction inside a Prisma transaction block to apply Postgres RLS.
-    const savedTransaction = await prisma.$transaction(async (tx) => {
+    const savedTransaction = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Set the session context variable for database Row-Level Security (RLS).
       await tx.$executeRawUnsafe(`SET LOCAL app.current_org_id = '${authContext.organization.id}';`);
 
@@ -68,7 +68,7 @@ transactionRouter.get("/", async (c) => {
     const cursor = c.req.query("cursor");
 
     // Fetch transactions inside a database transaction to apply local RLS constraints.
-    const transactions = await prisma.$transaction(async (tx) => {
+    const transactions = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Set the local session context to isolate queries at database layer.
       await tx.$executeRawUnsafe(`SET LOCAL app.current_org_id = '${authContext.organization.id}';`);
 
