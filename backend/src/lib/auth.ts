@@ -1,10 +1,7 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { organization } from "better-auth/plugins/organization";
-import { PrismaClient } from "@prisma/client";
-
-// Initialize the Prisma Client instance.
-const prisma = new PrismaClient();
+import { prisma } from "./prisma.js";
 
 // Configure the Better Auth instance with database adapter and plugins.
 export const auth = betterAuth({
