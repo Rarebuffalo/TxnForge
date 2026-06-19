@@ -1,9 +1,7 @@
-import request from "supertest";
 import { Hono } from "hono";
 import { authRouter } from "../src/routes/auth.js";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/prisma.js";
 
-const prisma = new PrismaClient();
 const app = new Hono();
 app.route("/api/auth", authRouter);
 
@@ -25,25 +23,30 @@ describe("Authentication & Workspace Provisioning Tests", () => {
   });
 
   test("POST /api/auth/register - Should register user and auto-provision organization", async () => {
-    const res = await request(app.fetch)
-      .post("/api/auth/register")
-      .send({
+    const res = await app.request("/api/auth/register", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         email: testEmail,
         password: testPassword,
         name: "Test User",
-      });
+      }),
+    });
 
     expect(res.status).toBe(201);
-    expect(res.body).toHaveProperty("user");
-    expect(res.body.user.email).toBe(testEmail);
-    expect(res.body).toHaveProperty("session");
+    const body = await res.json() as any;
+    expect(body).toHaveProperty("user");
+    expect(body.user.email).toBe(testEmail);
+    expect(body).toHaveProperty("token");
 
     // Assert that the default organization was created in the database.
     const org = await prisma.organization.findFirst({
       where: {
         members: {
           some: {
-            userId: res.body.user.id,
+            userId: body.user.id,
           },
         },
       },
@@ -54,28 +57,38 @@ describe("Authentication & Workspace Provisioning Tests", () => {
   });
 
   test("POST /api/auth/login - Should authenticate registered user", async () => {
-    const res = await request(app.fetch)
-      .post("/api/auth/login")
-      .send({
+    const res = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         email: testEmail,
         password: testPassword,
-      });
+      }),
+    });
 
     expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("user");
-    expect(res.body.user.email).toBe(testEmail);
-    expect(res.body).toHaveProperty("session");
+    const body = await res.json() as any;
+    expect(body).toHaveProperty("user");
+    expect(body.user.email).toBe(testEmail);
+    expect(body).toHaveProperty("token");
   });
 
   test("POST /api/auth/login - Should fail with incorrect credentials", async () => {
-    const res = await request(app.fetch)
-      .post("/api/auth/login")
-      .send({
+    const res = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         email: testEmail,
         password: "wrongPassword",
-      });
+      }),
+    });
 
     expect(res.status).toBe(401);
-    expect(res.body).toHaveProperty("error");
+    const body = await res.json() as any;
+    expect(body).toHaveProperty("error");
   });
 });
