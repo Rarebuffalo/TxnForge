@@ -20,6 +20,14 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+
+  // Enable cross-domain cookie attributes for cross-origin authentication
+  advanced: {
+    defaultCookieAttributes: {
+      sameSite: "none",
+      secure: true,
+    },
+  },
   
   // Set up plugins for multi-tenancy.
   plugins: [
