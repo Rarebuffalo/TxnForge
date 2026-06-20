@@ -10,7 +10,10 @@ export const auth = betterAuth({
   }),
   
   // Allow cross-origin requests from frontend client URL
-  trustedOrigins: [process.env.FRONTEND_URL || "http://localhost:3000"],
+  trustedOrigins: [
+    "http://localhost:3000",
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [])
+  ],
   
   // Enable email and password authentication.
   emailAndPassword: {

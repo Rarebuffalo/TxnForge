@@ -25,7 +25,17 @@ app.use(
 app.use(
   "*",
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: (origin) => {
+      // Allow localhost and vercel preview/production domains dynamically
+      if (
+        origin === "http://localhost:3000" ||
+        origin.endsWith(".vercel.app") ||
+        (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL)
+      ) {
+        return origin;
+      }
+      return process.env.FRONTEND_URL || "http://localhost:3000";
+    },
     allowHeaders: ["Content-Type", "Authorization", "x-organization-id"],
     allowMethods: ["POST", "GET", "OPTIONS"],
     credentials: true,
