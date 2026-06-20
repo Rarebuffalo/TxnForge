@@ -12,6 +12,7 @@ export const auth = betterAuth({
   // Allow cross-origin requests from frontend client URL
   trustedOrigins: [
     "http://localhost:3000",
+    "https://*.vercel.app",
     ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [])
   ],
   
