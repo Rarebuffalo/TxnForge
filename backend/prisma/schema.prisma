@@ -20,6 +20,8 @@ model User {
   members       Member[]
   transactions  Transaction[]
 
+  splits        TransactionSplit[]
+
   @@map("user")
 }
 
@@ -125,8 +127,29 @@ model Transaction {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
+  splits         TransactionSplit[]
+
   @@index([organizationId, date])
   @@index([organizationId, createdAt])
   @@index([userId, createdAt])
   @@map("transaction")
+}
+
+model TransactionSplit{
+  id             String       @id @default(uuid())
+  transactionId  String
+  transaction    Transaction  @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  userId         String
+  user           User @relation(fields: [userId] , references: [id], onDelete: Cascade)
+  
+  percentage     Float
+  createdAt      DateTime     @default(now())
+
+  @@index([transactionId])
+  @@index([userId])
+
+
+
+  
 }
