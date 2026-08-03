@@ -45,15 +45,26 @@ app.use(
 // Expose standard Better Auth routes.
 app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
-// Register routes for custom assignment auth endpoints.
+// Register routes for custom TxnForge auth endpoints.
 app.route("/api/auth", authRouter);
 
 // Register routes for protected financial transaction extractions.
 app.route("/api/transactions", transactionRouter);
 
+import { prisma } from "./lib/prisma.js";
+
 // Handle base URL request check.
-app.get("/", (c) => {
-  return c.text("Vessify Transaction Extractor API running successfully");
+app.get("/", async (c) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    const dbUrl = process.env.DATABASE_URL || "NOT SET";
+    const maskedUrl = dbUrl.replace(/:([^:@]+)@/, ":****@");
+    return c.text(`TxnForge API running successfully. DB connected! URL: ${maskedUrl}`);
+  } catch (err: any) {
+    const dbUrl = process.env.DATABASE_URL || "NOT SET";
+    const maskedUrl = dbUrl.replace(/:([^:@]+)@/, ":****@");
+    return c.text(`TxnForge API running, but DB connection failed! URL: ${maskedUrl}. Error: ${err.message}`);
+  }
 });
 
 // Configure the port and start the node server.
