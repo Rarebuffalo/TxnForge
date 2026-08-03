@@ -40,6 +40,7 @@ transactionRouter.post("/extract", async (c) => {
           confidence: parsed.confidence,
           userId: authContext.user.id,
           organizationId: authContext.organization.id,
+          
         },
       });
     });
@@ -76,6 +77,19 @@ transactionRouter.get("/", async (c) => {
         where: {
           organizationId: authContext.organization.id, // Application-layer filter.
         },
+        include: {
+          splits: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+          },
+        },
         cursor: cursor ? { id: cursor } : undefined,
         skip: cursor ? 1 : 0, // Avoid repeating the cursor record.
         orderBy: {
@@ -98,5 +112,172 @@ transactionRouter.get("/", async (c) => {
   } catch (error: any) {
     console.error("List transactions endpoint error:", error);
     return c.json({ error: error.message || "Internal Server Error loading transactions" }, 500);
+  }
+});
+
+/**
+ * GET /members
+ * Returns all users who are members of the active organization.
+ */
+transactionRouter.get("/members", async (c) => {
+  try {
+    const authContext = c.get("auth") as AuthContext;
+
+    const members = await prisma.member.findMany({
+      where: {
+        organizationId: authContext.organization.id,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    const users = members.map((m) => m.user);
+
+    return c.json({ data: users }, 200);
+  } catch (error: any) {
+    console.error("Fetch members endpoint error:", error);
+    return c.json({ error: error.message || "Internal Server Error loading members" }, 500);
+  }
+});
+
+/**
+ * POST /:id/split
+ * Saves/updates splits for a specific transaction.
+ */
+transactionRouter.post("/:id/split", async (c) => {
+  try {
+    const authContext = c.get("auth") as AuthContext;
+    const transactionId = c.req.param("id");
+    const { splits } = await c.req.json() as { splits: Array<{ userId: string; percentage: number }> };
+
+    if (!splits || !Array.isArray(splits) || splits.length === 0) {
+      return c.json({ error: "Invalid splits parameter: non-empty array 'splits' is required" }, 400);
+    }
+
+    const totalPercentage = splits.reduce((sum, item) => sum + item.percentage, 0);
+    if (Math.abs(totalPercentage - 100) > 0.001) {
+      return c.json({ error: `Total percentage must equal exactly 100%. Got ${totalPercentage}%` }, 400);
+    }
+
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.$executeRawUnsafe(`SET LOCAL app.current_org_id = '${authContext.organization.id}';`);
+
+      const transaction = await tx.transaction.findFirst({
+        where: {
+          id: transactionId,
+          organizationId: authContext.organization.id,
+        },
+      });
+
+      if (!transaction) {
+        throw new Error("Transaction not found or access denied");
+      }
+
+      const memberUserIds = await tx.member.findMany({
+        where: {
+          organizationId: authContext.organization.id,
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      const memberUserIdSet = new Set(memberUserIds.map((m) => m.userId));
+      for (const item of splits) {
+        if (!memberUserIdSet.has(item.userId)) {
+          throw new Error(`User ID ${item.userId} is not a member of the current organization`);
+        }
+      }
+
+      await tx.transactionSplit.deleteMany({
+        where: {
+          transactionId: transaction.id,
+        },
+      });
+
+      const createdSplits = await Promise.all(
+        splits.map((item) =>
+          tx.transactionSplit.create({
+            data: {
+              transactionId: transaction.id,
+              userId: item.userId,
+              percentage: item.percentage,
+            },
+          })
+        )
+      );
+
+      return createdSplits;
+    });
+
+    return c.json({
+      message: "Transaction splits saved successfully",
+      data: result,
+    }, 200);
+  } catch (error: any) {
+    console.error("Save split endpoint error:", error);
+    if (
+      error.message === "Transaction not found or access denied" ||
+      error.message.includes("is not a member")
+    ) {
+      return c.json({ error: error.message }, 400);
+    }
+    return c.json({ error: error.message || "Internal Server Error during splitting" }, 500);
+  }
+});
+
+/**
+ * GET /:id/splits
+ * Returns the split details for a specific transaction.
+ */
+transactionRouter.get("/:id/splits", async (c) => {
+  try {
+    const authContext = c.get("auth") as AuthContext;
+    const transactionId = c.req.param("id");
+
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.$executeRawUnsafe(`SET LOCAL app.current_org_id = '${authContext.organization.id}';`);
+
+      const transaction = await tx.transaction.findFirst({
+        where: {
+          id: transactionId,
+          organizationId: authContext.organization.id,
+        },
+      });
+
+      if (!transaction) {
+        throw new Error("Transaction not found or access denied");
+      }
+
+      return await tx.transactionSplit.findMany({
+        where: {
+          transactionId: transaction.id,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+    });
+
+    return c.json({ data: result }, 200);
+  } catch (error: any) {
+    console.error("Get splits endpoint error:", error);
+    if (error.message === "Transaction not found or access denied") {
+      return c.json({ error: error.message }, 400);
+    }
+    return c.json({ error: error.message || "Internal Server Error loading splits" }, 500);
   }
 });
