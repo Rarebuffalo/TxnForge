@@ -16,7 +16,22 @@ import {
   AlertTriangle,
   User as UserIcon,
   Loader2,
+  X,
+  Users,
 } from "lucide-react";
+
+interface TransactionSplit {
+  id: string;
+  transactionId: string;
+  userId: string;
+  percentage: number;
+  createdAt: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+  };
+}
 
 interface Transaction {
   id: string;
@@ -27,6 +42,7 @@ interface Transaction {
   category: string | null;
   confidence: number;
   createdAt: string;
+  splits?: TransactionSplit[];
 }
 
 export default function Dashboard() {
@@ -51,6 +67,13 @@ export default function Dashboard() {
     name: string;
   } | null>(null);
 
+  // Splits states
+  const [workspaceMembers, setWorkspaceMembers] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [selectedTxn, setSelectedTxn] = useState<Transaction | null>(null);
+  const [splitsData, setSplitsData] = useState<Record<string, number>>({});
+  const [isSubmittingSplit, setIsSubmittingSplit] = useState(false);
+
   // Redirect to login if session resolves null.
   useEffect(() => {
     if (!sessionPending && !sessionData) {
@@ -62,8 +85,8 @@ export default function Dashboard() {
   useEffect(() => {
     if (sessionData?.user) {
       const orgName = sessionData.user.name
-        ? `${sessionData.user.name}'s Workspace`
-        : `${sessionData.user.email.split("@")[0]}'s Workspace`;
+         ? `${sessionData.user.name}'s Workspace`
+         : `${sessionData.user.email.split("@")[0]}'s Workspace`;
 
       setActiveOrg({
         id: "default-org",
@@ -71,8 +94,121 @@ export default function Dashboard() {
       });
 
       fetchTransactions(null);
+      fetchMembers();
     }
   }, [sessionData]);
+
+  // Fetch workspace members.
+  const fetchMembers = async () => {
+    if (!sessionData?.session?.token) return;
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/transactions/members`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${sessionData.session.token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      if (res.ok) {
+        const payload = await res.json();
+        setWorkspaceMembers(payload.data || []);
+      }
+    } catch (err) {
+      console.error("Failed to load workspace members", err);
+    }
+  };
+
+  // Open split modal helper.
+  const handleOpenSplitModal = (txn: Transaction) => {
+    setSelectedTxn(txn);
+    const initialSplits: Record<string, number> = {};
+    if (txn.splits && txn.splits.length > 0) {
+      txn.splits.forEach((s) => {
+        initialSplits[s.userId] = s.percentage;
+      });
+    } else if (sessionData?.user?.id) {
+      initialSplits[sessionData.user.id] = 100;
+    }
+    setSplitsData(initialSplits);
+    setIsSplitModalOpen(true);
+  };
+
+  // Split equally helper.
+  const handleSplitEqually = () => {
+    // Get checked users from split list
+    const checkedUserIds = Object.keys(splitsData).filter(
+      (id) => splitsData[id] > 0 || splitsData[id] === 0
+    );
+    if (checkedUserIds.length === 0) return;
+
+    const share = parseFloat((100 / checkedUserIds.length).toFixed(2));
+    const newSplits: Record<string, number> = {};
+    checkedUserIds.forEach((id) => {
+      newSplits[id] = share;
+    });
+
+    const totalAllocated = share * checkedUserIds.length;
+    const diff = parseFloat((100 - totalAllocated).toFixed(2));
+    if (diff !== 0 && checkedUserIds.length > 0) {
+      newSplits[checkedUserIds[0]] = parseFloat(
+        (newSplits[checkedUserIds[0]] + diff).toFixed(2)
+      );
+    }
+    setSplitsData(newSplits);
+  };
+
+  // Submit splits helper.
+  const handleSaveSplits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTxn || !sessionData?.session?.token) return;
+
+    const payloadSplits = Object.entries(splitsData)
+      .map(([userId, percentage]) => ({ userId, percentage }))
+      .filter((item) => item.percentage > 0);
+
+    if (payloadSplits.length === 0) {
+      showFeedback("error", "At least one member must be allocated a share.");
+      return;
+    }
+
+    const sum = payloadSplits.reduce((acc, curr) => acc + curr.percentage, 0);
+    if (Math.abs(sum - 100) > 0.001) {
+      showFeedback("error", `Total split must equal exactly 100%. Current sum: ${sum}%`);
+      return;
+    }
+
+    setIsSubmittingSplit(true);
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/transactions/${selectedTxn.id}/split`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionData.session.token}`,
+          },
+          body: JSON.stringify({ splits: payloadSplits }),
+        }
+      );
+
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || "Failed to save splits");
+      }
+
+      showFeedback("success", "Transaction splits updated successfully.");
+      setIsSplitModalOpen(false);
+      fetchTransactions(null);
+    } catch (err: any) {
+      console.error(err);
+      showFeedback("error", err.message || "Failed to update splits.");
+    } finally {
+      setIsSubmittingSplit(false);
+    }
+  };
 
   // Fetch transactions from the Hono API using cursor-based pagination.
   const fetchTransactions = async (
@@ -368,6 +504,9 @@ export default function Dashboard() {
                       <th className="px-3 py-2.5 text-center font-semibold">
                         Confidence
                       </th>
+                      <th className="px-3 py-2.5 text-center font-semibold">
+                        Splits
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -388,10 +527,26 @@ export default function Dashboard() {
                             </span>
                           </td>
                           <td
-                            className="max-w-[140px] truncate px-3 py-2.5 font-medium text-zinc-200"
+                            className="max-w-[160px] px-3 py-2.5 font-medium text-zinc-200"
                             title={txn.description}
                           >
-                            {txn.description}
+                            <div className="truncate">{txn.description}</div>
+                            {txn.splits && txn.splits.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-500 font-normal">
+                                {txn.splits.map((s) => {
+                                  const isSelf = s.userId === sessionData?.user?.id;
+                                  const displayName = isSelf ? "You" : (s.user?.name || s.user?.email.split("@")[0]);
+                                  return (
+                                    <span
+                                      key={s.id}
+                                      className="rounded bg-zinc-900 px-1 py-0.5 border border-zinc-800"
+                                    >
+                                      {displayName}: {s.percentage}%
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2.5">
                             <span className="inline-block rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-400">
@@ -404,6 +559,23 @@ export default function Dashboard() {
                             }`}
                           >
                             {formatCurrency(txn.amount)}
+                            {txn.splits && txn.splits.length > 0 && (
+                              (() => {
+                                const mySplit = txn.splits.find(
+                                  (s) => s.userId === sessionData?.user?.id
+                                );
+                                if (mySplit) {
+                                  const personalShare =
+                                    (mySplit.percentage / 100) * amountVal;
+                                  return (
+                                    <div className="text-[10px] font-normal text-zinc-400 mt-0.5">
+                                      Your share: {formatCurrency(personalShare)}
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })()
+                            )}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2.5 text-right text-zinc-400">
                             {txn.balance !== null
@@ -414,14 +586,33 @@ export default function Dashboard() {
                             <span
                               className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${
                                 txn.confidence >= 0.8
-                                  ? "bg-emerald-500/10 text-emerald-400"
-                                  : txn.confidence >= 0.5
-                                    ? "bg-yellow-500/10 text-yellow-400"
-                                    : "bg-red-500/10 text-red-400"
+                                    ? "bg-emerald-500/10 text-emerald-400"
+                                    : txn.confidence >= 0.5
+                                      ? "bg-yellow-500/10 text-yellow-400"
+                                      : "bg-red-500/10 text-red-400"
                               }`}
                             >
                               {Math.round(txn.confidence * 100)}%
                             </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                            {txn.splits && txn.splits.length > 0 ? (
+                              <button
+                                onClick={() => handleOpenSplitModal(txn)}
+                                className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition"
+                              >
+                                <Users className="h-2.5 w-2.5" />
+                                {txn.splits.length} Shared
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleOpenSplitModal(txn)}
+                                className="inline-flex items-center gap-1 rounded bg-zinc-900 border border-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
+                              >
+                                <Plus className="h-2.5 w-2.5" />
+                                Split
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -444,6 +635,195 @@ export default function Dashboard() {
           )}
         </section>
       </div>
+
+      {/* Transaction Split Modal */}
+      {isSplitModalOpen && selectedTxn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm transition-opacity">
+          <div className="glass-card w-full max-w-lg overflow-hidden rounded-xl border border-zinc-800/80 bg-zinc-950 p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="mb-5 flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-indigo-400" />
+                <h3 className="text-base font-bold text-white">Split Transaction</h3>
+              </div>
+              <button
+                onClick={() => setIsSplitModalOpen(false)}
+                className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200 transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Txn Details Banner */}
+            <div className="mb-5 rounded-lg bg-zinc-900/60 p-3.5 border border-zinc-800/50">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Transaction</h4>
+                  <p className="text-sm font-bold text-white mt-0.5 truncate max-w-[220px]" title={selectedTxn.description}>
+                    {selectedTxn.description}
+                  </p>
+                  <p className="text-[10px] text-zinc-500 mt-0.5">{formatDate(selectedTxn.date)}</p>
+                </div>
+                <div className="text-right">
+                  <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Total Amount</h4>
+                  <p className={`text-sm font-bold mt-0.5 ${parseFloat(selectedTxn.amount.toString()) < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                    {formatCurrency(selectedTxn.amount)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Split Equal Button */}
+            <div className="mb-5 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSplitEqually}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition"
+              >
+                <Users className="h-3.5 w-3.5" />
+                Split Equally Between Checked Members
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSaveSplits} className="space-y-4">
+              <div className="max-h-[220px] overflow-y-auto space-y-3 pr-1">
+                {workspaceMembers.map((member) => {
+                  const isChecked = splitsData[member.id] !== undefined;
+                  const currentPercentage = splitsData[member.id] || 0;
+                  const totalTxnAmt = Math.abs(parseFloat(selectedTxn.amount.toString()));
+                  const calculatedShare = (currentPercentage / 100) * totalTxnAmt;
+                  const isDebit = parseFloat(selectedTxn.amount.toString()) < 0;
+
+                  return (
+                    <div
+                      key={member.id}
+                      className={`flex items-center justify-between rounded-lg border p-3 transition ${
+                        isChecked
+                          ? "bg-zinc-900/40 border-zinc-800"
+                          : "bg-zinc-950/20 border-zinc-905/60 opacity-60"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const newSplits = { ...splitsData };
+                            if (e.target.checked) {
+                              newSplits[member.id] = 0; // Initialize at 0%
+                            } else {
+                              delete newSplits[member.id]; // Exclude
+                            }
+                            setSplitsData(newSplits);
+                          }}
+                          className="h-4 w-4 rounded border-zinc-800 bg-zinc-900 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-zinc-950"
+                        />
+                        <div>
+                          <p className="text-xs font-bold text-white">
+                            {member.name || member.email.split("@")[0]}
+                            {member.id === sessionData?.user?.id && (
+                              <span className="ml-1 text-[10px] text-indigo-400 font-semibold">(You)</span>
+                            )}
+                          </p>
+                          <p className="text-[10px] text-zinc-500">{member.email}</p>
+                        </div>
+                      </div>
+
+                      {/* Split Percentage / Share calculator */}
+                      <div className="flex items-center gap-3.5">
+                        {isChecked ? (
+                          <>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="any"
+                                value={currentPercentage}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setSplitsData({
+                                    ...splitsData,
+                                    [member.id]: val,
+                                  });
+                                }}
+                                className="w-14 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-right text-xs text-white focus:border-indigo-500 focus:outline-none"
+                              />
+                              <span className="text-xs text-zinc-500">%</span>
+                            </div>
+                            <div className="text-right w-24">
+                              <span className={`text-xs font-semibold ${isDebit ? "text-red-400" : "text-emerald-400"}`}>
+                                {isDebit ? "- " : "+ "}
+                                {calculatedShare.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-xs text-zinc-650">Excluded</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Real-time Validation / Total display */}
+              {(() => {
+                const totalSum = Object.values(splitsData).reduce((a, b) => a + b, 0);
+                const isValid = Math.abs(totalSum - 100) < 0.001;
+
+                return (
+                  <div className="flex items-center justify-between border-t border-zinc-800 pt-3">
+                    <div>
+                      <p className="text-[10px] uppercase font-semibold text-zinc-500">Allocated Sum</p>
+                      <p className={`text-sm font-bold mt-0.5 ${isValid ? "text-emerald-400" : "text-yellow-450"}`}>
+                        {totalSum}% / 100%
+                      </p>
+                    </div>
+                    {!isValid && (
+                      <p className="text-[10px] text-yellow-500/80 max-w-[200px] text-right font-medium">
+                        Percentages must sum to exactly 100%
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Footer Actions */}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSplitModalOpen(false)}
+                  className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2 text-xs font-medium text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    isSubmittingSplit ||
+                    Math.abs(Object.values(splitsData).reduce((a, b) => a + b, 0) - 100) > 0.001
+                  }
+                  className="btn-primary hover-lift flex items-center justify-center rounded-lg px-4 py-2 text-xs"
+                >
+                  {isSubmittingSplit ? (
+                    <>
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Saving Splits...
+                    </>
+                  ) : (
+                    "Save Split Details"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
